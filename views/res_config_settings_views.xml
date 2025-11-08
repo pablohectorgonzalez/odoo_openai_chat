@@ -27,7 +27,7 @@
                                         <field name="openai_temperature"/>
                                         <field name="openai_context_count"/>
                                         <field name="openai_timeout"/>
-                                        <field name="openai_system_prompt_char" placeholder="Eres un asistente útil para usuarios de Odoo..."/>
+                                        <field name="openai_system_prompt" placeholder="Eres un asistente útil para usuarios de Odoo..."/>
                                     </div>
                                 </div>
                             </div>
