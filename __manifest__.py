@@ -5,7 +5,7 @@
     'author': 'MetaProject',
     'license': 'LGPL-3',
     'category': 'Productivity/Discuss',
-    'depends': ['mail'],
+    'depends': ['base_setup','mail'],
     'data': [
         'views/res_config_settings_views.xml',
     ],
