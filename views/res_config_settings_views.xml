@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_openai" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.openai.chat</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.view_res_config_settings"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='settings']" position="inside">
+                <div class="app_settings_block" data-string="OpenAI Chat" string="OpenAI Chat" name="openai_chat_settings">
+                    <h2>OpenAI Chat</h2>
+                    <div class="row mt16 o_settings_box">
+                        <div class="col-12 col-lg-6">
+                            <div class="o_setting_left_pane">
+                                <field name="openai_enabled"/>
+                            </div>
+                            <div class="o_setting_right_pane">
+                                <label for="openai_enabled"/>
+                                <div class="text-muted">Activa el comando /ai en Discuss y conversación 1:1 con el bot</div>
+                                <div class="content-group" attrs="{'invisible':[('openai_enabled','=',False)]}">
+                                    <field name="openai_api_key" password="True"/>
+                                    <field name="openai_organization"/>
+                                    <field name="openai_base_url"/>
+                                    <field name="openai_model"/>
+                                    <field name="openai_temperature"/>
+                                    <field name="openai_context_count"/>
+                                    <field name="openai_timeout"/>
+                                    <field name="openai_system_prompt" placeholder="Eres un asistente útil para usuarios de Odoo..."/>
+                                    <div class="text-muted">
+                                        Uso:
+                                        <ul>
+                                            <li>En cualquier canal escribe: <code>/ai ¿Tu pregunta?</code></li>
+                                            <li>O abre un chat 1:1 con "AI Assistant" y escribe directamente.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </xpath>
+        </field>
+    </record>
+</odoo>
