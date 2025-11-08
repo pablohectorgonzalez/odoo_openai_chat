@@ -28,7 +28,6 @@
                                         <field name="openai_context_count"/>
                                         <field name="openai_timeout"/>
                                         <field name="openai_system_prompt" placeholder="Eres un asistente útil para usuarios de Odoo..."/>
-                                        <button name="action_test_openai" type="object" string="Probar conexión" class="btn btn-secondary"/>
                                     </group>
                                 </div>
                             </div>
