@@ -19,7 +19,7 @@
                                     <div class="text-muted">
                                         Activa el comando /ai en Discuss y conversación 1:1 con el bot
                                     </div>
-                                    <group class="content-group" invisible="[('openai_enabled','=',False)]">
+                                    <group name="openai_settings_group" invisible="[('openai_enabled','=',False)]">
                                         <field name="openai_api_key" password="True"/>
                                         <field name="openai_organization"/>
                                         <field name="openai_base_url"/>
