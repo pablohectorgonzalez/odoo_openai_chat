@@ -109,30 +109,19 @@ class DiscussChannel(models.Model):
     
         threading.Thread(target=_worker, name=f'openai_ai_reply_{channel_id}', daemon=True).start()
 
+    # models/discuss_channel.py (fragmento)
     def _generate_ai_reply(self, prompt, exclude_message_id=None):
-        """
-        Decide el modo: Agents SDK > Assistants v2 > Chat Completions.
-        """
         ICP = self.env['ir.config_parameter'].sudo()
         mode = (ICP.get_param('openai_chat.agent_mode') or 'chat').lower()
-
-        # 1) Agents SDK (Runner)
+    
         if mode in ('agents', 'agents_sdk'):
             try:
                 from ..services.agents_runner import run_agent_for_channel
                 return run_agent_for_channel(self.env, self, prompt)
             except Exception as e:
-                _logger.warning('Fallo Agents SDK, fallback a siguiente modo: %s', e)
-
-        # 2) Assistants v2
-        assistant_id = ICP.get_param('openai_chat.assistant_id')
-        if mode == 'assistants' and assistant_id:
-            try:
-                return self._assistants_reply(prompt)
-            except Exception as e:
-                _logger.warning('Fallo Assistants v2, fallback a Chat: %s', e)
-
-        # 3) Chat Completions (fallback)
+                _logger.warning('Fallo Agents SDK, fallback a Assistants/Chat: %s', e)
+    
+        # ... Assistants si procede; si no, Chat Completions:
         cfg = self._get_openai_config()
         messages_payload = self._prepare_openai_chat_messages(
             user_prompt=prompt,
