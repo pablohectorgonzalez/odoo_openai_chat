@@ -122,54 +122,6 @@ class ResConfigSettings(models.TransientModel):
             }
         }
 
-    def action_test_openai(self):
-        self.ensure_one()
-        ICP = self.env['ir.config_parameter'].sudo()
-        api_key = ICP.get_param('openai_chat.api_key')
-        base_url = (ICP.get_param('openai_chat.base_url') or 'https://api.openai.com/v1').rstrip('/')
-        model = ICP.get_param('openai_chat.model') or 'gpt-4o-mini'
-        temperature = float(ICP.get_param('openai_chat.temperature') or 0.2)
-        system_prompt = ICP.get_param('openai_chat.system_prompt') or 'Eres un asistente útil para usuarios de Odoo.'
-        timeout = int(ICP.get_param('openai_chat.timeout') or 60)
-
-        if not api_key:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {'title': 'OpenAI', 'message': 'Falta API Key', 'type': 'danger', 'sticky': False}
-            }
-
-        url = f"{base_url}/chat/completions"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": model,
-            "temperature": temperature,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Responde con la palabra OK."},
-            ],
-        }
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-            if resp.ok:
-                return {
-                    'type': 'ir.actions.client',
-                    'tag': 'display_notification',
-                    'params': {'title': 'OpenAI', 'message': 'Conexión correcta', 'type': 'success', 'sticky': False}
-                }
-            else:
-                return {
-                    'type': 'ir.actions.client',
-                    'tag': 'display_notification',
-                    'params': {'title': 'OpenAI', 'message': f"Error {resp.status_code}: {resp.text[:200]}", 'type': 'danger', 'sticky': False}
-                }
-        except Exception as e:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {'title': 'OpenAI', 'message': f'Excepción: {e}', 'type': 'danger', 'sticky': False}
-            }
-
     @api.onchange('openai_base_url')
     def _onchange_openai_base_url(self):
         if self.openai_base_url:
