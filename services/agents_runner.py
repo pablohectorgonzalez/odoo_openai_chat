@@ -3,15 +3,14 @@
 import os
 import asyncio
 import logging
-
-from odoo import tools, _
+from odoo import tools
 
 _logger = logging.getLogger(__name__)
 
+class AgentsRunError(Exception):
+    pass
+
 def _import_agents():
-    """
-    pip: pip install "openai-agents @ git+https://github.com/openai/openai-agents-python.git"
-    """
     try:
         from agents import (
             FileSearchTool,
@@ -25,49 +24,57 @@ def _import_agents():
         from openai.types.shared.reasoning import Reasoning
         return FileSearchTool, Agent, ModelSettings, Runner, RunConfig, trace, SQLiteSession, Reasoning
     except Exception as e:
-        raise RuntimeError(
-            "Agents SDK no instalado. Ejecuta:\n"
+        raise AgentsRunError(
+            'Agents SDK no instalado. Ejecuta:\n'
             'pip install "openai-agents @ git+https://github.com/openai/openai-agents-python.git"'
         ) from e
 
-def _build_agent(env, model=None):
-    """
-    Construye el agente con parámetros desde Ajustes. Si model se pasa, lo usa; si no, lee de config.
-    """
+def _supports_reasoning(model: str) -> bool:
+    m = (model or "").lower()
+    # Los razonadores oficiales son o4, o4-mini y familia 4.1
+    return m.startswith("o4") or m.startswith("gpt-4.1")
+
+def _build_agent(env, model=None, with_tools=True):
     FileSearchTool, Agent, ModelSettings, Runner, RunConfig, trace, SQLiteSession, Reasoning = _import_agents()
     ICP = env['ir.config_parameter'].sudo()
 
-    instructions = ICP.get_param('openai_chat.agent_instructions') or \
-                   ICP.get_param('openai_chat.system_prompt') or \
-                   'Eres un asistente experto en Odoo 17 Community y sus módulos.'
-    model = model or ICP.get_param('openai_chat.agent_model') or \
-            ICP.get_param('openai_chat.model') or 'gpt-4o-mini'
+    instructions = (
+        ICP.get_param('openai_chat.agent_instructions')
+        or ICP.get_param('openai_chat.system_prompt')
+        or 'Eres un asistente experto en Odoo 17 Community y sus módulos.'
+    )
+    model = (
+        model
+        or ICP.get_param('openai_chat.agent_model')
+        or ICP.get_param('openai_chat.model')
+        or 'o4-mini'
+    )
     vec_ids_str = ICP.get_param('openai_chat.agent_vector_store_ids') or ''
     vec_ids = [v.strip() for v in vec_ids_str.split(',') if v.strip()]
 
     tools_list = []
-    if vec_ids:
+    if with_tools and vec_ids:
         tools_list.append(FileSearchTool(vector_store_ids=vec_ids))
+
+    # reasoning solo si el modelo lo soporta
+    ms_kwargs = dict(store=True)
+    if _supports_reasoning(model):
+        try:
+            from openai.types.shared.reasoning import Reasoning
+            ms_kwargs['reasoning'] = Reasoning(effort="high", summary="auto")
+        except Exception:
+            pass
 
     agent = Agent(
         name="Odoo Support Agent",
         instructions=instructions,
         model=model,
         tools=tools_list,
-        model_settings=ModelSettings(
-            store=True,
-            reasoning=Reasoning(
-                effort="high",
-                summary="auto",
-            ),
-        ),
+        model_settings=ModelSettings(**ms_kwargs),
     )
-    return agent
+    return agent, bool(vec_ids)
 
 def _run_async(coro):
-    """
-    Ejecuta una corrutina en un event loop propio (evita problemas si ya hay un loop).
-    """
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
@@ -81,26 +88,19 @@ def _run_async(coro):
         asyncio.set_event_loop(None)
 
 def run_agent_for_channel(env, channel, user_prompt):
-    """
-    Ejecuta el agente (Agents SDK) para un canal de Discuss.
-    - Memoria por canal con SQLiteSession en filestore.
-    - Pone timeout y fallback de modelo si el configurado no existe.
-    - Nunca devuelve cadena vacía (si falla, devuelve un mensaje de error).
-    """
     FileSearchTool, Agent, ModelSettings, Runner, RunConfig, trace, SQLiteSession, Reasoning = _import_agents()
     ICP = env['ir.config_parameter'].sudo()
 
     api_key = ICP.get_param('openai_chat.api_key')
     base_url = (ICP.get_param('openai_chat.base_url') or 'https://api.openai.com/v1').rstrip('/')
     timeout = int(ICP.get_param('openai_chat.timeout') or 60)
-    fallback_model = 'gpt-4o-mini'  # por si el modelo configurado no está disponible
-
     if not api_key:
-        raise ValueError('Falta API Key para Agents SDK')
+        raise AgentsRunError('Falta API Key para Agents SDK')
 
-    # Variables de entorno que el SDK puede leer
+    # Variables de entorno (el SDK suele leer estas)
     os.environ['OPENAI_API_KEY'] = api_key
     os.environ['OPENAI_BASE_URL'] = base_url
+    os.environ['OPENAI_API_BASE'] = base_url  # por compatibilidad
 
     # Sesión SQLite por canal
     filestore_dir = tools.config.filestore(env.cr.dbname)
@@ -109,16 +109,11 @@ def run_agent_for_channel(env, channel, user_prompt):
     session_path = os.path.join(agents_dir, f'channel_{channel.id}.sqlite3')
     session = SQLiteSession(session_path)
 
-    # Entrada del usuario en formato TResponseInputItem[]
     input_items = [
-        {
-            "role": "user",
-            "content": [{"type": "input_text", "text": user_prompt}],
-        }
+        {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]}
     ]
 
     def _extract_text(result):
-        # final_output_as(str) si está disponible
         text = None
         if hasattr(result, 'final_output_as'):
             try:
@@ -131,7 +126,6 @@ def run_agent_for_channel(env, channel, user_prompt):
 
     async def _call(agent):
         with trace("Odoo Agents Run"):
-            # Algunas versiones aceptan request_timeout; si no, caemos sin él
             try:
                 return await Runner.run(
                     agent,
@@ -144,7 +138,7 @@ def run_agent_for_channel(env, channel, user_prompt):
                     request_timeout=timeout,
                 )
             except TypeError:
-                _logger.debug("Runner.run() no acepta request_timeout en esta versión; reintentando sin timeout kwarg")
+                # versiones que no aceptan request_timeout
                 return await Runner.run(
                     agent,
                     input=input_items,
@@ -155,30 +149,31 @@ def run_agent_for_channel(env, channel, user_prompt):
                     }),
                 )
 
-    # 1) Intento con el modelo configurado
-    try:
-        agent = _build_agent(env)
-        _logger.info("Agents: ejecutando modelo '%s' para canal %s", agent.model, channel.id)
-        result = _run_async(_call(agent))
-        text = _extract_text(result)
-        if not text:
-            _logger.warning("Agents: respuesta vacía para canal %s", channel.id)
-            return _("No se pudo obtener respuesta del modelo.")
-        return text
-    except Exception as e:
-        msg = str(e)
-        _logger.warning("Agents: error con modelo configurado: %s", msg)
+    # Estrategia en cascada:
+    # 1) Modelo configurado con tools (si hay)
+    # 2) Modelo configurado sin tools
+    # 3) Modelo fallback (o4-mini) con tools
+    # 4) Modelo fallback sin tools
+    errors = []
 
-    # 2) Fallback de modelo (p.ej. cuando 'gpt-5' no está habilitado)
-    try:
-        agent_fb = _build_agent(env, model=fallback_model)
-        _logger.info("Agents: intentando fallback con modelo '%s' para canal %s", agent_fb.model, channel.id)
-        result = _run_async(_call(agent_fb))
-        text = _extract_text(result)
-        if not text:
-            _logger.warning("Agents fallback: respuesta vacía para canal %s", channel.id)
-            return _("No se pudo obtener respuesta del modelo.")
-        return text
-    except Exception as e2:
-        _logger.exception("Agents fallback: error definitivo: %s", e2)
-        return _("No se pudo obtener respuesta del modelo.")
+    for step, (model, with_tools) in enumerate([
+        (None, True),
+        (None, False),
+        ('o4-mini', True),
+        ('o4-mini', False),
+    ], start=1):
+        try:
+            agent, had_vec = _build_agent(env, model=model, with_tools=with_tools)
+            _logger.info("Agents step %s -> model=%s, tools=%s, channel=%s", step, agent.model, with_tools and had_vec, channel.id)
+            result = _run_async(_call(agent))
+            text = _extract_text(result)
+            if text:
+                return text
+            errors.append(f"step {step}: respuesta vacía")
+        except Exception as e:
+            msg = f"step {step} error: {type(e).__name__}: {e}"
+            errors.append(msg)
+            _logger.warning("Agents: %s", msg, exc_info=True)
+
+    # Si todas fallan, relanza para que _generate_ai_reply haga fallback a Chat
+    raise AgentsRunError("; ".join(errors))
