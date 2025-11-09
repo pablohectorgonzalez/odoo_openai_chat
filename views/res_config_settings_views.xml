@@ -33,7 +33,7 @@
                                         <separator string="Modo de agente"/>
                                         <field name="openai_agent_mode"/>
                                         <field name="openai_assistant_id"/>
-                                        <field name="openai_agent_instructions" placeholder="Instrucciones del agente (Agent Builder / Runner)" attrs="{'invisible':[('openai_agent_mode','!=','agents')]}"/>
+                                        <field name="openai_agent_instructions" placeholder="Instrucciones del agente (Agent Builder / Runner)" />
 
                                         <button name="action_test_openai" type="object" string="Probar conexión" class="btn btn-secondary"/>
                                     </group>
