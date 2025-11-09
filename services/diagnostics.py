@@ -337,36 +337,36 @@ def run_deep_diagnostics(env, prompt='Di "pong".', channel_id=None, timeout=25) 
     return report
 
 
-    def format_report(report: Dict[str, Any]) -> str:
-        lines = []
-        s = report.get("summary", {})
-        lines.append(f"OK: {s.get('ok')} | errors: {s.get('errors')} | warnings: {s.get('warnings')}")
-        cfg = report.get("config", {})
-        lines.append(
-            f"base_url={cfg.get('base_url')}, api_key_present={cfg.get('api_key_present')}, "
-            f"agent_mode={cfg.get('agent_mode')}, agent_model={cfg.get('agent_model')}, "
-            f"vec_store_count={cfg.get('vector_store_ids_count')}"
-        )
-        for c in report.get("checks", []):
-            d = c.get("details") or {}
-            msg = f"- {c['name']}: {c['status']}"
-            if c.get("duration") is not None:
-                msg += f" ({c['duration']}s)"
-            if isinstance(d, dict):
-                model = d.get("model")
-                if model:
-                    msg += f" [model={model}]"
-                status_code = d.get("status_code")
-                if status_code is not None:
-                    msg += f" [status={status_code}]"
-                out = d.get("output") or ""
-                if out:
-                    out80 = out[:80]
-                    # Sanitizar antes de interpolar (evita backslashes en f-string)
-                    out80 = out80.replace("\n", " ").replace("\r", " ")
-                    msg += f" out={out80}"
-            if c.get("error"):
-                # Aquí no usamos backslashes en expresiones; es seguro
-                msg += " ERR={}".format(str(c["error"])[:200])
-            lines.append(msg)
-        return "\n".join(lines)
+def format_report(report: Dict[str, Any]) -> str:
+    lines = []
+    s = report.get("summary", {})
+    lines.append(f"OK: {s.get('ok')} | errors: {s.get('errors')} | warnings: {s.get('warnings')}")
+    cfg = report.get("config", {})
+    lines.append(
+        f"base_url={cfg.get('base_url')}, api_key_present={cfg.get('api_key_present')}, "
+        f"agent_mode={cfg.get('agent_mode')}, agent_model={cfg.get('agent_model')}, "
+        f"vec_store_count={cfg.get('vector_store_ids_count')}"
+    )
+    for c in report.get("checks", []):
+        d = c.get("details") or {}
+        msg = f"- {c['name']}: {c['status']}"
+        if c.get("duration") is not None:
+            msg += f" ({c['duration']}s)"
+        if isinstance(d, dict):
+            model = d.get("model")
+            if model:
+                msg += f" [model={model}]"
+            status_code = d.get("status_code")
+            if status_code is not None:
+                msg += f" [status={status_code}]"
+            out = d.get("output") or ""
+            if out:
+                out80 = out[:80]
+                # Sanitizar antes de interpolar (evita backslashes en f-string)
+                out80 = out80.replace("\n", " ").replace("\r", " ")
+                msg += f" out={out80}"
+        if c.get("error"):
+            # Aquí no usamos backslashes en expresiones; es seguro
+            msg += " ERR={}".format(str(c["error"])[:200])
+        lines.append(msg)
+    return "\n".join(lines)
