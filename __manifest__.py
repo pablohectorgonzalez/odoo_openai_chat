@@ -1,6 +1,6 @@
 {
     'name': 'OpenAI Chat for Discuss',
-    'version': '17.0.1.2.0',
+    'version': '17.0.1.2.1,
     'summary': 'Conecta OpenAI al chat de Discuss mediante /ai o chat 1:1 con un bot',
     'author': 'MetaProject',
     'license': 'LGPL-3',
