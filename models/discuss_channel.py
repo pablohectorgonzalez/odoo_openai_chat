@@ -53,18 +53,19 @@ class DiscussChannel(models.Model):
 
             ai_partner = self._get_or_create_ai_partner()
 
-            # Placeholder visible de inmediato
+
             placeholder = self.with_context(openai_skip=True).message_post(
                 body=tools.plaintext2html(_("Generando respuesta...")),
                 author_id=ai_partner.id,
                 message_type='comment',
                 subtype_xmlid='mail.mt_comment',
             )
-            # COMMIT para que el bus notifique sin refrescar
             self.env.cr.commit()
 
+            
+
             # Lanza worker en background
-            self._ai_reply_async(self.id, user_prompt, message.id, ai_partner.id)
+            self._ai_reply_async(self.id, user_prompt, placeholder.id, ai_partner.id)
 
         except Exception as e:
             _logger.exception('Error al procesar respuesta de OpenAI: %s', e)
