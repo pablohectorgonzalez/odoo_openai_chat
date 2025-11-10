@@ -110,76 +110,163 @@ class DiscussChannel(models.Model):
         from odoo import api, SUPERUSER_ID
         dbname = self.env.cr.dbname
 
+        def _worker_once(channel_id, prompt, placeholder_message_id, ai_partner_id):
+            registry = odoo.registry(dbname)
+            with registry.cursor() as cr:
+                env = api.Environment(cr, SUPERUSER_ID, {})
+                channel = env['discuss.channel'].browse(channel_id)
+
+                # Generar la respuesta
+                try:
+                    reply = channel._generate_ai_reply(prompt, exclude_message_id=placeholder_message_id)
+                    if not reply:
+                        reply = _("No se pudo obtener respuesta del modelo.")
+                except Exception as e:
+                    _logger.exception('AI worker error during generation: %s', e)
+                    reply = _("No se pudo obtener respuesta del modelo.")
+
+                # Eliminar el placeholder si existiera
+                try:
+                    if placeholder_message_id:
+                        ph = env['mail.message'].sudo().browse(placeholder_message_id)
+                        if ph.exists():
+                            ph.unlink()
+                except Exception as ex:
+                    _logger.warning("No se pudo eliminar el placeholder %s: %s", placeholder_message_id, ex)
+
+                # Publica el resultado
+                _logger.info("AI reply length: %d", len(reply) if reply else 0)
+                _logger.debug("AI reply preview: %s", (reply[:200] + '...') if reply else '""')
+                try:
+                    ai_msg = channel.with_context(openai_skip=True).message_post(
+                        body=tools.plaintext2html(reply),
+                        author_id=ai_partner_id,
+                        message_type='comment',
+                        subtype_xmlid='mail.mt_comment',
+                    )
+                    _logger.info("AI worker: published message_id=%s in channel=%s",
+                                 getattr(ai_msg, 'id', None), channel_id)
+                except Exception as post_ex:
+                    _logger.exception("AI worker: fallo al publicar la respuesta: %s", post_ex)
+
+                # Commit con retry ante concurrencia
+                try:
+                    _safe_commit(cr, _logger)
+                except psycopg2.errors.InFailedSqlTransaction as e:
+                    _logger.error("Commit aborted due to InFailedSqlTransaction: %s", e)
+                    try:
+                        cr.rollback()
+                    except Exception:
+                        pass
+                    return
+                except psycopg2.errors.SerializationFailure as e:
+                    _logger.warning("SerializationFailure during commit: %s", e)
+                    try:
+                        cr.rollback()
+                    except Exception:
+                        pass
+                    return
+                except Exception as commit_ex:
+                    _logger.exception("Commit final failed: %s", commit_ex)
+                    try:
+                        cr.rollback()
+                    except Exception:
+                        pass
+                    return
+
         def _worker():
             _logger.info("AI worker: start canal=%s, prompt_len=%d",
                          channel_id, len(prompt) if prompt else 0)
 
-            try:
-                registry = odoo.registry(dbname)
-                with registry.cursor() as cr:
-                    env = api.Environment(cr, SUPERUSER_ID, {})
-                    channel = env['discuss.channel'].browse(channel_id)
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                registry = None
+                cr = None
+                try:
+                    registry = odoo.registry(dbname)
+                    with registry.cursor() as cr_ctx:
+                        cr = cr_ctx
+                        env = api.Environment(cr, SUPERUSER_ID, {})
+                        # Re-fetch channel in this new environment
+                        channel = env['discuss.channel'].browse(channel_id)
 
-                    # Generar la respuesta
-                    try:
-                        reply = channel._generate_ai_reply(prompt, exclude_message_id=placeholder_message_id)
-                        if not reply:
+                        # Generar la respuesta
+                        try:
+                            reply = channel._generate_ai_reply(prompt, exclude_message_id=placeholder_message_id)
+                            if not reply:
+                                reply = _("No se pudo obtener respuesta del modelo.")
+                        except Exception as e:
+                            _logger.exception('AI worker error during generation: %s', e)
                             reply = _("No se pudo obtener respuesta del modelo.")
-                    except Exception as e:
-                        _logger.exception('AI worker error during generation: %s', e)
-                        reply = _("No se pudo obtener respuesta del modelo.")
 
-                    # Eliminar el placeholder si existiera
-                    try:
-                        if placeholder_message_id:
-                            ph = env['mail.message'].sudo().browse(placeholder_message_id)
-                            if ph.exists():
-                                ph.unlink()
-                    except Exception as ex:
-                        _logger.warning("No se pudo eliminar el placeholder %s: %s", placeholder_message_id, ex)
-
-                    # Publica el resultado
-                    _logger.info("AI reply length: %d", len(reply) if reply else 0)
-                    _logger.debug("AI reply preview: %s", (reply[:200] + '...') if reply else '""')
-                    try:
-                        ai_msg = channel.with_context(openai_skip=True).message_post(
-                            body=tools.plaintext2html(reply),
-                            author_id=ai_partner_id,
-                            message_type='comment',
-                            subtype_xmlid='mail.mt_comment',
-                        )
-                        _logger.info("AI worker: published message_id=%s in channel=%s",
-                                     getattr(ai_msg, 'id', None), channel_id)
-                    except Exception as post_ex:
-                        _logger.exception("AI worker: fallo al publicar la respuesta: %s", post_ex)
-
-                    # Commit con retry ante concurrencia
-                    try:
-                        _safe_commit(cr, _logger)
-                    except psycopg2.errors.InFailedSqlTransaction as e:
-                        _logger.error("Commit aborted due to InFailedSqlTransaction: %s", e)
+                        # Eliminar placeholder si existiera
                         try:
-                            cr.rollback()
-                        except Exception:
-                            pass
-                        return
-                    except psycopg2.errors.SerializationFailure as e:
-                        _logger.error("SerializationFailure during commit: %s", e)
-                        try:
-                            cr.rollback()
-                        except Exception:
-                            pass
-                        return
-                    except Exception as commit_ex:
-                        _logger.exception("Commit final failed: %s", commit_ex)
-                        try:
-                            cr.rollback()
-                        except Exception:
-                            pass
-                        return
+                            if placeholder_message_id:
+                                ph = env['mail.message'].sudo().browse(placeholder_message_id)
+                                if ph.exists():
+                                    ph.unlink()
+                        except Exception as ex:
+                            _logger.warning("No se pudo eliminar el placeholder %s: %s", placeholder_message_id, ex)
 
-            except Exception as ex:
-                _logger.exception("AI worker global failure canal=%s: %s", channel_id, ex)
+                        # Publica el resultado
+                        _logger.info("AI reply length: %d", len(reply) if reply else 0)
+                        _logger.debug("AI reply preview: %s", (reply[:200] + '...') if reply else '""')
+                        try:
+                            ai_msg = channel.with_context(openai_skip=True).message_post(
+                                body=tools.plaintext2html(reply),
+                                author_id=ai_partner_id,
+                                message_type='comment',
+                                subtype_xmlid='mail.mt_comment',
+                            )
+                            _logger.info("AI worker: published message_id=%s in channel=%s",
+                                         getattr(ai_msg, 'id', None), channel_id)
+                        except Exception as post_ex:
+                            _logger.exception("AI worker: fallo al publicar la respuesta: %s", post_ex)
+
+                        # Commit con retry
+                        try:
+                            _safe_commit(cr, _logger)
+                        except psycopg2.errors.InFailedSqlTransaction as e:
+                            _logger.error("Commit aborted due to InFailedSqlTransaction: %s", e)
+                            try:
+                                cr.rollback()
+                            except Exception:
+                                pass
+                            return
+                        except psycopg2.errors.SerializationFailure as e:
+                            _logger.warning("SerializationFailure during commit: %s", e)
+                            try:
+                                cr.rollback()
+                            except Exception:
+                                pass
+                            return
+                        except Exception as commit_ex:
+                            _logger.exception("Commit final failed: %s", commit_ex)
+                            try:
+                                cr.rollback()
+                            except Exception:
+                                pass
+                            return
+
+                        _logger.info("AI worker: canal=%s attempt=%d finished successfully", channel_id, attempt)
+                        break  # éxito, salir del loop
+
+                except (psycopg2.errors.SerializationFailure, psycopg2.errors.InFailedSqlTransaction) as e:
+                    _logger.warning("Serialization issue canal=%s attempt %d: %s", channel_id, attempt, e)
+                    try:
+                        if cr:
+                            cr.rollback()
+                    except Exception:
+                        pass
+                    if attempt < max_attempts:
+                        time.sleep(0.2)
+                        continue
+                    else:
+                        _logger.error("Max retries reached for canal=%s", channel_id)
+                        break
+                except Exception as ex:
+                    _logger.exception("AI worker fatal error canal=%s: %s", channel_id, ex)
+                    break
 
             _logger.info("AI worker: end canal=%s", channel_id)
 
