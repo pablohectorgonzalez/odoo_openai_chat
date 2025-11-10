@@ -54,7 +54,7 @@ class DiscussChannel(models.Model):
             ai_partner = self._get_or_create_ai_partner()
 
             # No crear un placeholder inicial. Invocar al worker en segundo plano sin placeholder
-            _logger.info("OpenAI: iniciando procesamiento asincrónico para canal=%s, prompt_len=%d", 
+            _logger.info("OpenAI: iniciando procesamiento asincrónico para canal=%s, prompt_len=%d",
                          self.id, len(user_prompt or ''))
             self._ai_reply_async(self.id, user_prompt, None, ai_partner.id)
 
@@ -77,7 +77,8 @@ class DiscussChannel(models.Model):
         dbname = self.env.cr.dbname
     
         def _worker():
-            _logger.info("AI worker: start canal=%s, prompt_len=%d", channel_id, len(prompt) if prompt else 0)
+            _logger.info("AI worker: start canal=%s, prompt_len=%d", channel_id,
+                         len(prompt) if prompt else 0)
             with api.Environment.manage():
                 registry = odoo.registry(dbname)
                 with registry.cursor() as cr:
@@ -103,7 +104,7 @@ class DiscussChannel(models.Model):
     
                     # Publica el resultado
                     _logger.info("AI reply length: %d", len(reply) if reply else 0)
-                    _logger.debug("AI reply preview: %s", (reply[:100] + '...') if reply else '""')
+                    _logger.debug("AI reply preview: %s", (reply[:200] + '...') if reply else '""')
                     try:
                         ai_msg = channel.with_context(openai_skip=True).message_post(
                             body=tools.plaintext2html(reply),
@@ -112,7 +113,7 @@ class DiscussChannel(models.Model):
                             subtype_xmlid='mail.mt_comment',
                         )
                         # Confirmar id del mensaje publicado
-                        _logger.info("AI worker: published message_id=%s in channel=%s", 
+                        _logger.info("AI worker: published message_id=%s in channel=%s",
                                      getattr(ai_msg, 'id', None), channel_id)
                     except Exception as post_ex:
                         _logger.exception("AI worker: fallo al publicar la respuesta: %s", post_ex)
