@@ -53,19 +53,8 @@ class DiscussChannel(models.Model):
 
             ai_partner = self._get_or_create_ai_partner()
 
-
-            placeholder = self.with_context(openai_skip=True).message_post(
-                body=tools.plaintext2html(_("Generando respuesta...")),
-                author_id=ai_partner.id,
-                message_type='comment',
-                subtype_xmlid='mail.mt_comment',
-            )
-            self.env.cr.commit()
-
-            
-
-            # Lanza worker en background
-            self._ai_reply_async(self.id, user_prompt, placeholder.id, ai_partner.id)
+            # No crear un placeholder inicial. Invocar al worker en segundo plano sin placeholder
+            self._ai_reply_async(self.id, user_prompt, None, ai_partner.id)
 
         except Exception as e:
             _logger.exception('Error al procesar respuesta de OpenAI: %s', e)
@@ -101,11 +90,12 @@ class DiscussChannel(models.Model):
                         _logger.exception('AI worker error: %s', e)
                         reply = _("No se pudo obtener respuesta del modelo.")
     
-                    # Intenta eliminar el placeholder y publica la respuesta como nuevo mensaje
+                    # Elimina el placeholder solo si existe y se pasó un ID válido
                     try:
-                        ph = env['mail.message'].sudo().browse(placeholder_message_id)
-                        if ph.exists():
-                            ph.unlink()  # esto dispara la actualización en la UI
+                        if placeholder_message_id:
+                            ph = env['mail.message'].sudo().browse(placeholder_message_id)
+                            if ph.exists():
+                                ph.unlink()  # esto dispara la actualización en la UI
                     except Exception as ex:
                         _logger.warning("No se pudo eliminar el placeholder %s: %s", placeholder_message_id, ex)
     
