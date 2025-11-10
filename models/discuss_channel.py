@@ -68,6 +68,7 @@ class DiscussChannel(models.Model):
     # Worker async (thread)
     # ---------------------------
 
+    # models/discuss_channel.py (fragmento)
     def _ai_reply_async(self, channel_id, prompt, placeholder_message_id, ai_partner_id):
         import threading
         from odoo import api, SUPERUSER_ID
@@ -79,50 +80,49 @@ class DiscussChannel(models.Model):
             _logger.info("AI worker: start canal=%s, prompt_len=%d", channel_id,
                          len(prompt) if prompt else 0)
             try:
-                with api.Environment.manage():
-                    registry = odoo.registry(dbname)
-                    with registry.cursor() as cr:
-                        env = api.Environment(cr, SUPERUSER_ID, {})
-                        channel = env['discuss.channel'].browse(channel_id)
-                        # Generar respuesta
-                        try:
-                            reply = channel._generate_ai_reply(prompt, exclude_message_id=placeholder_message_id)
-                            if not reply:
-                                reply = _("No se pudo obtener respuesta del modelo.")
-                        except Exception as e:
-                            _logger.exception('AI worker error during generation: %s', e)
+                registry = odoo.registry(dbname)
+                with registry.cursor() as cr:
+                    env = api.Environment(cr, SUPERUSER_ID, {})
+                    channel = env['discuss.channel'].browse(channel_id)
+                    try:
+                        # EXCLUIR el placeholder del contexto, NO el mensaje del usuario
+                        reply = channel._generate_ai_reply(prompt, exclude_message_id=placeholder_message_id)
+                        if not reply:
                             reply = _("No se pudo obtener respuesta del modelo.")
+                    except Exception as e:
+                        _logger.exception('AI worker error: %s', e)
+                        reply = _("No se pudo obtener respuesta del modelo.")
     
-                        # Elimina el placeholder solo si existe y se pasó un ID válido
-                        try:
-                            if placeholder_message_id:
-                                ph = env['mail.message'].sudo().browse(placeholder_message_id)
-                                if ph.exists():
-                                    ph.unlink()  # esto dispara la actualización en la UI
-                        except Exception as ex:
-                            _logger.warning("No se pudo eliminar el placeholder %s: %s", placeholder_message_id, ex)
+                    # Elimina el placeholder solo si existe y se pasó un ID válido
+                    try:
+                        if placeholder_message_id:
+                            ph = env['mail.message'].sudo().browse(placeholder_message_id)
+                            if ph.exists():
+                                ph.unlink()  # esto dispara la actualización en la UI
+                    except Exception as ex:
+                        _logger.warning("No se pudo eliminar el placeholder %s: %s", placeholder_message_id, ex)
     
-                        # Publica el resultado
-                        _logger.info("AI reply length: %d", len(reply) if reply else 0)
-                        _logger.debug("AI reply preview: %s", (reply[:200] + '...') if reply else '""')
-                        try:
-                            ai_msg = channel.with_context(openai_skip=True).message_post(
-                                body=tools.plaintext2html(reply),
-                                author_id=ai_partner_id,
-                                message_type='comment',
-                                subtype_xmlid='mail.mt_comment',
-                            )
-                            _logger.info("AI worker: published message_id=%s in channel=%s",
-                                         getattr(ai_msg, 'id', None), channel_id)
-                        except Exception as post_ex:
-                            _logger.exception("AI worker: fallo al publicar la respuesta: %s", post_ex)
+                    # Publica el resultado
+                    _logger.info("Body: %s", tools.plaintext2html(reply))
+                    try:
+                        ai_msg = channel.with_context(openai_skip=True).message_post(
+                            body=tools.plaintext2html(reply),
+                            author_id=ai_partner_id,
+                            message_type='comment',
+                            subtype_xmlid='mail.mt_comment',
+                        )
+                        _logger.info("AI worker: published message_id=%s in channel=%s",
+                                     getattr(ai_msg, 'id', None), channel_id)
+                    except Exception as post_ex:
+                        _logger.exception("AI worker: fallo al publicar la respuesta: %s", post_ex)
     
-                        cr.commit()
+                    cr.commit()
             except Exception as ex:
                 _logger.exception("AI worker global failure canal=%s: %s", channel_id, ex)
             _logger.info("AI worker: end canal=%s", channel_id)
     
         threading.Thread(target=_worker, name=f'openai_ai_reply_{channel_id}', daemon=True).start()
+
 
 
     # models/discuss_channel.py
@@ -164,7 +164,7 @@ class DiscussChannel(models.Model):
         ICP = self.env['ir.config_parameter'].sudo()
         api_key = ICP.get_param('openai_chat.api_key')
         base_url = (ICP.get_param('openai_chat.base_url') or 'https://api.openai.com/v1').rstrip('/')
-        assistant_id = ICP.get_param('openai_chat.assistant_id')
+        master = ICP.get_param('openai_chat.assistant_id')
         timeout = int(ICP.get_param('openai_chat.timeout') or 60)
 
         headers = {
@@ -183,7 +183,7 @@ class DiscussChannel(models.Model):
 
         r = requests.post(f"{base_url}/threads/{thread_id}/messages", headers=headers, json={"role": "user", "content": user_content}, timeout=timeout)
         r.raise_for_status()
-        r = requests.post(f"{base_url}/threads/{thread_id}/runs", headers=headers, json={"assistant_id": assistant_id}, timeout=timeout)
+        r = requests.post(f"{base_url}/threads/{thread_id}/runs", headers=headers, json={"assistant_id": master}, timeout=timeout)
         r.raise_for_status()
         run = r.json()
         run_id = run['id']
