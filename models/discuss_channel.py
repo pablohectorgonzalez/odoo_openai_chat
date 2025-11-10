@@ -199,17 +199,28 @@ class DiscussChannel(models.Model):
 
                             # enviar notificación por bus para que el cliente vea el nuevo mensaje
                             try:
-                                # channel_id es int
-                                bus = env['bus.bus'].sudo()
-                                # el canal del bus que usa Discuss: ('<dbname>', 'mail.channel', <channel_id>)
-                                bus.sendone((cr.dbname, 'mail.channel', int(channel_id)), {
-                                    'type': 'new_message',
-                                    'channel_id': int(channel_id),
-                                    'message_id': ai_msg_id,
-                                    'body': tools.html2plaintext(reply),   # opcional: cliente puede usar body para render
-                                })
-                            except Exception as bus_ex:
-                                _logger.warning("No se pudo enviar notificación por bus: %s", bus_ex)
+
+                                cr.commit()
+                                _logger.info("AI worker: published message_id=%s in channel=%s (attempt %s)",
+                                             ai_msg_id, channel_id, attempt)
+                            
+                                # --- NOTIFICAR por bus DESPUÉS del commit ---
+                                try:
+                                    env['bus.bus'].sudo().sendone((cr.dbname, 'mail.channel', int(channel_id)), {
+                                        'type': 'new_message',
+                                        'channel_id': int(channel_id),
+                                        'message_id': ai_msg_id,
+                                        'body': tools.html2plaintext(reply),
+                                    })
+                                    _logger.debug("Bus notification sent for channel %s message %s", channel_id, ai_msg_id)
+                                except Exception as bus_ex:
+                                    _logger.warning("No se pudo enviar notificación por bus tras commit: %s", bus_ex)
+                            
+                                return    
+                                
+                            
+                            except Exception as commit_ex:
+                                _logger.warning("No se pudo enviar notificación por commit: %s", commit_ex)
                         except psycopg2.errors.SerializationFailure as e:
                             _logger.warning(
                                 "SerializationFailure during message_post (attempt %d/%d) canal=%s: %s",
