@@ -15,19 +15,12 @@ class DiscussChannelMember(models.Model):
         if self.env.context.get('openai_skip_pin'):
             vals = dict(vals)  # copia
             removed = []
-            # Campos que originan el choque mostrado en los logs
             if 'is_pinned' in vals:
                 vals.pop('is_pinned', None)
                 removed.append('is_pinned')
             if 'last_interest_dt' in vals:
                 vals.pop('last_interest_dt', None)
                 removed.append('last_interest_dt')
-
-            # (Opcional) si observas conflictos con otros campos de interés, puedes filtrarlos aquí:
-            # if 'last_seen_dt' in vals:
-            #     vals.pop('last_seen_dt', None)
-            #     removed.append('last_seen_dt')
-
             if removed:
                 _logger.debug("openai_skip_pin: filtrando %s en write(%s)", removed, self.ids)
         return super().write(vals)
