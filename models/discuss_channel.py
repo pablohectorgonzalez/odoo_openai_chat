@@ -54,6 +54,8 @@ class DiscussChannel(models.Model):
             ai_partner = self._get_or_create_ai_partner()
 
             # No crear un placeholder inicial. Invocar al worker en segundo plano sin placeholder
+            _logger.info("OpenAI: iniciando procesamiento asincrónico para canal=%s, prompt_len=%d", 
+                         self.id, len(user_prompt or ''))
             self._ai_reply_async(self.id, user_prompt, None, ai_partner.id)
 
         except Exception as e:
@@ -75,7 +77,7 @@ class DiscussChannel(models.Model):
         dbname = self.env.cr.dbname
     
         def _worker():
-            _logger.info("AI worker: start canal=%s", channel_id)
+            _logger.info("AI worker: start canal=%s, prompt_len=%d", channel_id, len(prompt) if prompt else 0)
             with api.Environment.manage():
                 registry = odoo.registry(dbname)
                 with registry.cursor() as cr:
@@ -100,13 +102,21 @@ class DiscussChannel(models.Model):
                         _logger.warning("No se pudo eliminar el placeholder %s: %s", placeholder_message_id, ex)
     
                     # Publica el resultado
-                    _logger.info("Body: %s", tools.plaintext2html(reply))
-                    channel.with_context(openai_skip=True).message_post(
-                        body=tools.plaintext2html(reply),
-                        author_id=ai_partner_id,
-                        message_type='comment',
-                        subtype_xmlid='mail.mt_comment',
-                    )
+                    _logger.info("AI reply length: %d", len(reply) if reply else 0)
+                    _logger.debug("AI reply preview: %s", (reply[:100] + '...') if reply else '""')
+                    try:
+                        ai_msg = channel.with_context(openai_skip=True).message_post(
+                            body=tools.plaintext2html(reply),
+                            author_id=ai_partner_id,
+                            message_type='comment',
+                            subtype_xmlid='mail.mt_comment',
+                        )
+                        # Confirmar id del mensaje publicado
+                        _logger.info("AI worker: published message_id=%s in channel=%s", 
+                                     getattr(ai_msg, 'id', None), channel_id)
+                    except Exception as post_ex:
+                        _logger.exception("AI worker: fallo al publicar la respuesta: %s", post_ex)
+    
                     cr.commit()
             _logger.info("AI worker: end canal=%s", channel_id)
     
