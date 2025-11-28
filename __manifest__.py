@@ -12,7 +12,11 @@
     "external_dependencies": {
         "python": ["requests", "openai"]  # 'openai-agents-python' opcional
     },
-    'assets': {},
+    'assets': {
+        'web.assets_backend': [
+            'odoo_openai_chat/static/src/js/patch_emoji_guard.js',
+        ],
+    },
     'application': False,
     'installable': True,
 }
